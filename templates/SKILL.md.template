@@ -1,0 +1,57 @@
+---
+name: cmem
+description: "Persistent vector memory for Claude Code. Store decisions, facts, preferences across sessions. Triggers: '/cmem', 'remember this', 'recall', 'what did we decide'."
+user_invocable: true
+---
+
+# cmem - Claude Memory Skill
+
+Persistent vector memory management for Claude Code.
+
+## Usage
+
+**Syntax**: `/cmem <command> [args] [options]`
+
+When user invokes `/cmem`, parse the ARGUMENTS to determine the command:
+- If args start with a known command → execute it via CLI
+- If no args or just `/cmem` → show status
+
+## Proactive Usage
+
+**IMPORTANT**: Before implementing features or making architectural decisions on projects with cmem memories, automatically run:
+```bash
+node ~/.claude/cmem/dist/cli.js recall "<relevant keywords>"
+```
+to check for existing decisions, patterns, or constraints.
+
+## Commands Reference
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `status` | Check MLX & system status | `/cmem status` |
+| `stats` | Memory statistics | `/cmem stats` |
+| `list [n]` | List n recent memories | `/cmem list 5` |
+| `recall <query>` | Semantic search | `/cmem recall authentication` |
+| `remember <content>` | Save a new memory | `/cmem remember "Using JWT"` |
+| `forget <id>` | Delete a memory | `/cmem forget 42` |
+| `obsolete <id>` | Mark as outdated | `/cmem obsolete 12` |
+| `project:new <name>` | Register project | `/cmem project:new myapp` |
+| `project:list` | List projects | `/cmem project:list` |
+| `gc` | Garbage collect | `/cmem gc` |
+| `ingest <path>` | Import documentation | `/cmem ingest ./docs` |
+
+## Options for `remember`
+
+| Option | Description |
+|--------|-------------|
+| `--type=<type>` | decision, preference, fact, pattern, conversation |
+| `--importance=<1-5>` | Priority level (default: 3) |
+| `--reasoning=<why>` | Explanation for decisions |
+| `--category=<tag>` | Category tag |
+
+## Execution
+
+When this skill is invoked, execute the CLI command:
+```bash
+node ~/.claude/cmem/dist/cli.js <command> <args> <options>
+```

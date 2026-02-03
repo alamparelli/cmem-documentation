@@ -1,0 +1,42 @@
+{
+  "embedding": {
+    "provider": "mlx",
+    "model": "all-MiniLM-L6-v2-4bit",
+    "dimensions": 384,
+    "baseUrl": "http://127.0.0.1:8767"
+  },
+  "chunking": {
+    "maxTokens": 500,
+    "overlapTokens": 50,
+    "minChunkSize": 100
+  },
+  "recall": {
+    "projectResults": 5,
+    "globalResults": 2,
+    "globalTypesInProject": ["preference", "fact"],
+    "distanceThreshold": 50.0,
+    "boostRecency": true,
+    "recencyHalfLifeDays": 30
+  },
+  "capture": {
+    "autoSession": true,
+    "autoCommit": true,
+    "commitPatterns": ["^(feat|fix|refactor|breaking|perf)"],
+    "minImportance": 3
+  },
+  "sensitive": {
+    "patterns": [
+      "sk-[a-zA-Z0-9]{32,}",
+      "ghp_[a-zA-Z0-9]{36}",
+      "github_pat_[a-zA-Z0-9_]{22,}",
+      "xoxb-[a-zA-Z0-9-]+",
+      "password\\s*[:=]\\s*\\S+",
+      "secret\\s*[:=]\\s*\\S+",
+      "api[_-]?key\\s*[:=]\\s*\\S+"
+    ]
+  },
+  "gc": {
+    "maxAgeUnusedDays": 180,
+    "minConfidence": 0.3
+  }
+}
