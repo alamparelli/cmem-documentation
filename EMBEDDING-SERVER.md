@@ -281,6 +281,47 @@ launchctl list | grep cmem
 tail -f ~/.claude/cmem/mlx-server/server.log
 ```
 
+## Start Script
+
+Create `~/.claude/cmem/mlx-server/start.sh`:
+
+```bash
+#!/bin/bash
+# MLX Embedding Server starter script
+
+PORT=8767
+
+# Check if server is already running on this port
+if lsof -i :$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+    exit 0
+fi
+
+cd "$(dirname "$0")"
+
+# Create venv if it doesn't exist
+if [ ! -d "venv" ]; then
+    echo "Creating Python virtual environment..."
+    python3 -m venv venv
+fi
+
+# Activate venv
+source venv/bin/activate
+
+# Install/update dependencies
+pip install -q -r requirements.txt
+
+# Start server
+echo "Starting MLX embedding server on port $PORT..."
+uvicorn server:app --host 127.0.0.1 --port $PORT --log-level warning
+```
+
+Make it executable:
+```bash
+chmod +x ~/.claude/cmem/mlx-server/start.sh
+```
+
+**Important:** The `lsof` check at the beginning prevents multiple instances from starting. Without this, concurrent calls (e.g., from hooks and LaunchAgent) can cause memory accumulation as each failed bind attempt loads the model before failing.
+
 ## Manual Running
 
 For development or debugging:
@@ -355,11 +396,44 @@ python -c "from mlx_embeddings.utils import load; load('mlx-community/all-MiniLM
 
 ### Memory Issues
 
-The model uses ~200MB RAM when loaded. If memory is tight:
+The model uses ~200-400MB RAM when loaded. If memory is tight:
 
 1. Use a smaller model
 2. Reduce `max_length` in tokenizer
 3. Process smaller batches
+
+### Excessive Memory Usage (Multi-GB)
+
+**Symptom:** Python process using 10+ GB of RAM.
+
+**Cause:** Multiple concurrent start attempts (hooks + LaunchAgent) where each:
+1. Loads the model (~100-200MB)
+2. Fails to bind port ("address already in use")
+3. Shuts down but memory not immediately freed
+4. Next attempt starts...
+
+After 50-100+ cycles, memory accumulates to gigabytes.
+
+**Fix:** Ensure `start.sh` checks if port is already in use before starting:
+
+```bash
+# At the top of start.sh
+if lsof -i :$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+    exit 0
+fi
+```
+
+**Recovery:**
+```bash
+# Stop LaunchAgent
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.cmem.mlx-server.plist
+
+# Kill all instances
+pkill -9 -f "uvicorn server:app.*8767"
+
+# Restart cleanly
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cmem.mlx-server.plist
+```
 
 ### Performance Tuning
 
