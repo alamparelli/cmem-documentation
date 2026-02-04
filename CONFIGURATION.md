@@ -1,5 +1,13 @@
 # CMEM Configuration Reference
 
+## Claude Code Hooks
+
+Hooks are configured in `~/.claude/settings.json`.
+
+> ⚠️ **IMPORTANT**: Do NOT put hooks in `settings.local.json` if `settings.json` has a `hooks` section — they will be ignored. See [HOOKS.md](./HOOKS.md) for details.
+
+---
+
 ## config.json
 
 Location: `~/.claude/cmem/config.json`

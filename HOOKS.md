@@ -8,47 +8,62 @@ Claude Code hooks allow cmem to automatically capture and inject memories during
 |------|---------|---------|
 | `UserPromptSubmit` | Before each prompt | Inject relevant memories + detect implicit stores |
 | `PostToolUse` | After Bash commands | Capture significant git commits |
+| `Stop` | After each response | Capture session context |
 | `PreCompact` | Before context compaction | Extract session knowledge before it's lost |
 
 ## Configuration
 
-Add to `~/.claude/settings.local.json`:
+> ⚠️ **IMPORTANT**: Add hooks to `~/.claude/settings.json` (NOT `settings.local.json`).
+> Claude Code does NOT merge hooks between these files. If `settings.json` has a `hooks` section, the `hooks` in `settings.local.json` are **ignored**.
+
+> ⚠️ **Use absolute paths**: The `~` shorthand may not be expanded correctly in all contexts. Always use full paths like `/Users/yourname/.claude/...`
+
+Add to `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       {
-        "matcher": {},
         "hooks": [
           {
             "type": "command",
-            "command": "node ~/.claude/cmem/dist/hooks/recall.js",
-            "timeout": 3000
+            "command": "node /Users/yourname/.claude/cmem/dist/hooks/recall.js",
+            "timeout": 10
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": { "tools": ["Bash"] },
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node ~/.claude/cmem/dist/hooks/capture-commit.js",
-            "timeout": 5000
+            "command": "node /Users/yourname/.claude/cmem/dist/hooks/capture-commit.js",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/yourname/.claude/cmem/dist/hooks/capture-response.js",
+            "timeout": 20
           }
         ]
       }
     ],
     "PreCompact": [
       {
-        "matcher": {},
         "hooks": [
           {
             "type": "command",
-            "command": "node ~/.claude/cmem/dist/hooks/extract-before-compact.js",
-            "timeout": 30000
+            "command": "node /Users/yourname/.claude/cmem/dist/hooks/extract-before-compact.js",
+            "timeout": 45
           }
         ]
       }
@@ -56,6 +71,8 @@ Add to `~/.claude/settings.local.json`:
   }
 }
 ```
+
+> **Note**: Timeouts are in **seconds** (not milliseconds).
 
 ---
 
@@ -265,9 +282,12 @@ cmem log --clear  # Clear log file
 
 | Hook | Timeout | Why |
 |------|---------|-----|
-| recall | 3000ms | Must be fast, runs on every prompt |
-| capture-commit | 5000ms | Background, can take slightly longer |
-| extract-before-compact | 30000ms | Uses Haiku API, can be slow |
+| recall | 10s | Must be reasonably fast, runs on every prompt |
+| capture-commit | 5s | Background, can take slightly longer |
+| capture-response | 20s | Processes after response completes |
+| extract-before-compact | 45s | Uses Haiku API, can be slow |
+
+> **Note**: Timeouts are in **seconds** in Claude Code settings (not milliseconds).
 
 ### Error Handling
 
@@ -334,13 +354,51 @@ Add to settings:
 ```json
 "PostToolUse": [
   {
-    "matcher": { "tools": ["Read"] },
+    "matcher": "Read",
     "hooks": [
       {
         "type": "command",
-        "command": "node ~/.claude/cmem/dist/hooks/my-custom-hook.js"
+        "command": "node /Users/yourname/.claude/cmem/dist/hooks/my-custom-hook.js"
       }
     ]
   }
 ]
 ```
+
+---
+
+## Troubleshooting
+
+### Hooks not triggering
+
+**Symptom**: Hooks don't run even though configured.
+
+**Cause**: Hooks in `settings.local.json` are ignored if `settings.json` has a `hooks` section.
+
+**Solution**: Put ALL hooks in `settings.json`, not `settings.local.json`.
+
+**Diagnosis**:
+```bash
+# Check if hook logs anything
+tail -f ~/.claude/cmem/hooks.log
+
+# Test hook manually
+echo '{"prompt":"test","cwd":"/your/project"}' | node ~/.claude/cmem/dist/hooks/recall.js
+```
+
+### Hooks start but don't complete
+
+**Symptom**: `[STARTUP] Hook script started` in logs but no further output.
+
+**Possible causes**:
+1. **Timeout too short** - Increase timeout in settings
+2. **MLX server not running** - Start with `~/.claude/cmem/start.sh`
+3. **Path issues** - Use absolute paths, not `~`
+
+### Changes not taking effect
+
+**Symptom**: Modified hooks don't run differently.
+
+**Cause**: Claude Code loads hooks at session start.
+
+**Solution**: Restart Claude Code (new session) after modifying hooks.
