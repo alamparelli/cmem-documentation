@@ -8,7 +8,7 @@ Claude Code hooks allow cmem to automatically capture and inject memories during
 |------|---------|---------|
 | `UserPromptSubmit` | Before each prompt | Inject relevant memories + detect implicit stores |
 | `PostToolUse` | After Bash commands | Capture significant git commits |
-| `Stop` | After each response | Capture session context |
+| `Stop` | After each response | Extract facts/decisions via Haiku |
 | `PreCompact` | Before context compaction | Extract session knowledge before it's lost |
 
 ## Configuration
@@ -94,6 +94,22 @@ Runs before every prompt to:
   "transcript_path": "~/.claude/sessions/abc123.jsonl"
 }
 ```
+
+### Transcript Format
+
+Claude Code uses JSONL format for transcripts. The hooks support both formats:
+
+**Old format** (pre-2026):
+```json
+{"role": "assistant", "content": "text response"}
+```
+
+**New format** (2026+):
+```json
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "..."}]}}
+```
+
+In the new format, `content` is an array of content blocks. The hooks filter for `type: "text"` blocks and skip `tool_use`/`tool_result` blocks.
 
 ### Output (stdout)
 
@@ -197,7 +213,84 @@ For each captured commit:
 
 ---
 
-## Hook 3: PreCompact (extract-before-compact.js)
+## Hook 3: Stop (capture-response.js)
+
+### Purpose
+
+Runs after Claude completes a response. Extracts important facts and decisions using Claude Haiku.
+
+### When It Runs
+
+Claude Code triggers the Stop hook when:
+- Claude finishes generating a response
+- The response is long enough to potentially contain valuable information
+
+### Input (JSON via stdin)
+
+```json
+{
+  "session_id": "abc123",
+  "cwd": "/Users/me/my-project",
+  "transcript_path": "~/.claude/sessions/abc123.jsonl"
+}
+```
+
+### Processing Logic
+
+1. **Read Last Response**: Extract the last assistant message from transcript
+2. **Length Check**: Skip if response < 300 characters (MIN_RESPONSE_LENGTH)
+3. **Haiku Extraction**: Use Claude Haiku to identify important items
+4. **Deduplicate**: Check against existing memories (distance < 5 or word overlap > 85%)
+5. **Store**: Save non-duplicate items with importance >= 3
+
+### Haiku Extraction Prompt
+
+```
+Extract IMPORTANT information to remember:
+
+EXTRACT (importance 4-5):
+- Technical decisions: lib choices, patterns, architecture
+- Bugs discovered and fixes applied
+- Configurations discovered (API, limits, env)
+- Explicit user preferences
+
+EXTRACT (importance 3):
+- Modified code structure
+- Recurring patterns observed
+- Important business context
+
+DO NOT extract:
+- Raw source code
+- Generic explanations
+- Unanswered questions
+- Verbose error logs
+
+Return JSON: {"items": [{"type": "decision|fact|preference", "content": "...", "importance": 1-5}]}
+```
+
+### Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MIN_RESPONSE_LENGTH` | 300 | Skip responses shorter than this |
+| `SIMILARITY_THRESHOLD` | 0.85 | Word overlap threshold for deduplication |
+
+### Stored Memory Format
+
+```javascript
+{
+  content: "extracted content",
+  type: "decision|fact|preference",
+  source: "auto:response",
+  importance: 3-5,
+  confidence: 0.8,
+  category: "extracted"
+}
+```
+
+---
+
+## Hook 4: PreCompact (extract-before-compact.js)
 
 ### Purpose
 
@@ -261,10 +354,11 @@ Before storing, each memory is checked against existing memories:
 All hooks log to `~/.claude/cmem/hooks.log`:
 
 ```
-[2024-01-15T10:30:45.123Z] [recall] [my-project] Task type: feature
-[2024-01-15T10:30:45.234Z] [recall] [my-project] Searching: "how does auth work..."
-[2024-01-15T10:30:45.456Z] [recall] [my-project] Found 3 memories
-[2024-01-15T10:31:12.789Z] [capture-commit] [my-project] Captured commit as decision: "feat: add auth..."
+[2026-02-04T10:30:45.123Z] [recall] [my-project] Task type: feature
+[2026-02-04T10:30:45.234Z] [recall] [my-project] Searching: "how does auth work..."
+[2026-02-04T10:30:45.456Z] [recall] [my-project] Found 3 memories
+[2026-02-04T10:31:12.789Z] [capture-commit] [my-project] Captured commit as decision: "feat: add auth..."
+[2026-02-04T10:31:30.012Z] [capture-response] [my-project] Stored: [decision] "Using JWT for auth..."
 ```
 
 View logs:
