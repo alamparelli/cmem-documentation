@@ -186,6 +186,24 @@ cmem forget:source auto:ingest
 cmem ingest ./docs --category=documentation
 ```
 
+## Workflow 11: Project Handoff or Backup
+
+When handing off a project or creating a full backup:
+
+```bash
+# Export all memories for a project (Markdown)
+cmem dump my-project
+
+# Export as JSON for backup/processing
+cmem dump my-project --json > my-project-memories.json
+
+# Include obsolete memories for complete history
+cmem dump my-project --include-obsolete
+
+# Dump current project (auto-detect)
+cmem dump
+```
+
 ## CLI Quick Reference
 
 ```bash
@@ -194,6 +212,7 @@ cmem status              # Check system health
 cmem recall "query"      # Search memories
 cmem remember "text"     # Save memory
 cmem list 10             # Recent memories
+cmem dump project        # Export ALL project memories
 cmem stats               # Memory statistics
 cmem log                 # View hook logs
 ```

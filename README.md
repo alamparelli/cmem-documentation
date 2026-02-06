@@ -9,7 +9,8 @@ CMEM (Claude Memory) provides semantic memory capabilities for Claude Code sessi
 - **Persistent storage**: Memories survive across sessions via SQLite + vector embeddings
 - **Semantic search**: Find relevant memories by meaning, not just keywords
 - **Multi-scope storage**: Global preferences + per-project knowledge
-- **Automatic capture**: Commits and session context automatically memorized
+- **Automatic capture**: Session context automatically memorized
+- **Deduplication**: Near-duplicate detection prevents memory bloat
 - **Privacy-aware**: Sensitive data (API keys, passwords) automatically redacted
 
 ## Documentation Structure
@@ -61,7 +62,7 @@ See [INSTALLATION.md](./INSTALLATION.md) for complete setup.
 |--------|-------------|
 | `manual` | User explicitly saved |
 | `auto:session` | Implicit detection from prompt |
-| `auto:commit` | Captured from git commits |
+| `auto:commit` | Captured from git commits (disabled by default) |
 | `auto:precompact` | Extracted before context compaction |
 | `auto:ingest` | Bulk imported from documentation |
 
@@ -79,11 +80,14 @@ User Prompt → Embed Query → Search Memories → Inject Context → Claude Re
 
 ## Version
 
-This documentation reflects CMEM v3 with:
+This documentation reflects CMEM v3.1 with:
 - Unified SQLite database (single `memories.db`)
 - MLX-based embeddings (Apple Silicon native)
 - Project detection via registry
 - Claude Code hooks integration
+- Deduplication on `remember()` (embedding-based near-duplicate detection)
+- Garbage collection with `--consolidate` and `--clean-corrupted`
+- Haiku intent analysis disabled at prompt (passthrough mode for performance)
 
 ## License
 

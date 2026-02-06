@@ -376,9 +376,10 @@ async function main() {
   // PART 2: INTENT-AWARE RECALL (cmem v4)
   // ============================================
 
-  // Analyze query intent with Haiku
-  const intent = await analyzeQueryIntent(query);
-  log(`Intent: explicit=${intent.isExplicitRecall}, subjects=[${intent.subjects.join(',')}]`);
+  // Analyze query intent with Haiku (TEMPORARILY DISABLED for perf testing)
+  // const intent = await analyzeQueryIntent(query);
+  const intent: QueryIntent = { isExplicitRecall: false, subjects: [], reformulatedQuery: query };
+  log(`Intent: HAIKU DISABLED - using passthrough`);
 
   // Get recent context for enrichment (fallback)
   const recentContext = getRecentContext(transcriptPath);

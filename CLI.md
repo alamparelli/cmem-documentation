@@ -16,6 +16,7 @@ cmem status                         # Check system status
 cmem remember <content> [options]   # Save memory
 cmem recall <query> [options]       # Search memories
 cmem list [n]                       # List recent memories
+cmem dump [project]                 # Export ALL project memories
 cmem forget <id>                    # Delete memory
 cmem obsolete <id>                  # Mark as outdated
 cmem project:new <name>             # Register project
@@ -138,6 +139,70 @@ cmem list --project=backend
 
 # All projects
 cmem list --all-projects
+```
+
+---
+
+### dump
+
+Export ALL memories for a project (no semantic search, no limit).
+
+```bash
+cmem dump [project-name] [options]
+```
+
+**Arguments:**
+- `project-name`: Project to dump (optional, auto-detects from current directory)
+
+**Options:**
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON instead of Markdown |
+| `--include-obsolete` | Include obsolete memories |
+
+**Use case:** Full project memory export for backup, review, or handoff. Unlike `recall` which uses semantic search with limits, `dump` retrieves everything.
+
+**Examples:**
+```bash
+# Dump current project (auto-detect)
+cmem dump
+
+# Dump specific project
+cmem dump xlens
+
+# JSON output for scripting
+cmem dump xlens --json > xlens-memories.json
+
+# Include obsolete memories
+cmem dump xlens --include-obsolete
+```
+
+**Markdown Output:**
+```markdown
+# Memory Dump: xlens
+Generated: 2024-02-05T14:30:00Z
+Total: 42 memories (3 obsolete excluded)
+
+## Decisions (12)
+
+### #45 - Using JWT in httpOnly cookies
+- **Importance**: 4/5
+- **Reasoning**: Security best practice for XSS protection
+- **Created**: 2024-01-15
+
+### #38 - Chose Prisma ORM
+...
+
+## Facts (18)
+
+### #52 - API rate limit is 100 req/min
+...
+
+## Preferences (8)
+...
+
+## Global Memories (4)
+...
 ```
 
 ---
@@ -444,9 +509,13 @@ cmem gc [options]
 |------|-------------|
 | `--all` | All projects + global |
 | `--project=<name>` | Specific project |
+| `--consolidate` | Merge near-duplicate memories into clusters |
+| `--clean-corrupted` | Remove malformed memories (JSON artifacts, Haiku prompts, tiny content) |
+| `--dry-run` | Preview changes without applying |
 
-**Example:**
+**Examples:**
 ```bash
+# Standard GC (removes old unused low-confidence memories)
 cmem gc
 # Output: 5 memories cleaned.
 
@@ -454,7 +523,42 @@ cmem gc --all
 # Global: 2 memories cleaned
 # my-app: 3 memories cleaned
 # Total: 5 memories cleaned
+
+# Preview corrupted memories to remove
+cmem gc --clean-corrupted --dry-run
+# Would remove 336 corrupted memories:
+#   #627: {"items": []}\n\nRéponse à analyser:...
+#   ...
+
+# Actually remove them
+cmem gc --clean-corrupted
+# Removed 336 corrupted memories.
+
+# Preview consolidation (clusters near-duplicates, keeps best-scored)
+cmem gc --consolidate --dry-run
+# Would consolidate 625 memories in 114 clusters:
+#   Keep #1 → merge #664, #670, #2, ...
+
+# Apply consolidation (marks losers as obsolete)
+cmem gc --consolidate --all
+# Consolidated 625 memories in 114 clusters.
 ```
+
+### Consolidation Algorithm
+
+1. For each active memory, find neighbors within `dedup.similarityThreshold * 2` distance
+2. Group into clusters
+3. Score each memory: `importance * confidence * (1 + accessCount)`
+4. Keep highest-scored memory per cluster
+5. Mark others as obsolete with `supersedes` pointing to the winner
+
+### Corrupted Memory Patterns
+
+`--clean-corrupted` removes memories matching:
+- Starts with `{` (JSON object artifacts)
+- Starts with `[` followed by non-word char (JSON array artifacts, not `[filepath]` prefixed)
+- Contains Haiku prompt leaks ("Sois exhaustif", "Réponds UNIQUEMENT en JSON", "Tu es un assistant")
+- Content shorter than 20 characters
 
 ---
 

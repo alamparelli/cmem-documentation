@@ -89,7 +89,11 @@
 │   └── hooks/
 │       ├── recall.ts         # UserPromptSubmit hook
 │       ├── capture-commit.ts # PostToolUse hook
+│       ├── capture-response.ts      # Stop hook
 │       └── extract-before-compact.ts  # PreCompact hook
+│
+├── scripts/
+│   └── gc-auto.sh           # Automatic GC (runs via launchd every 6h)
 │
 ├── dist/                     # Compiled JavaScript
 │   └── (mirrors src/)
@@ -123,6 +127,8 @@ class MemoryManager {
 
   // Maintenance
   async garbageCollect(project?: string): Promise<number>
+  async consolidate(project?: string, dryRun?: boolean): Promise<ConsolidateResult>
+  async cleanupCorrupted(dryRun?: boolean): Promise<CleanupResult>
   async getStats(project?: string): Promise<Stats>
 
   // Utilities
@@ -173,8 +179,9 @@ class ProjectRegistryManager {
 ```
 Content → Sanitize → Chunk → For Each Chunk:
                               → Embed (MLX)
-                              → Store memory row
-                              → Store embedding vector
+                              → Dedup Check (find nearest neighbor < threshold)
+                                → If duplicate: update existing (keep max importance, longer content)
+                                → If new: store memory row + embedding vector
 ```
 
 ### Recall Flow

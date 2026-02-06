@@ -79,6 +79,9 @@ MAINTENANCE COMMANDS
   stats                    Memory statistics
   gc                       Clean old unused memories
     --all                  All projects + global
+    --consolidate          Merge near-duplicate memories
+    --clean-corrupted      Remove corrupted/malformed memories
+    --dry-run              Preview without changes
   log [n]                  Show last n hook logs (default: 20)
     --clear                Clear the log file
 
@@ -425,6 +428,34 @@ async function main() {
       }
 
       case 'gc': {
+        const dryRun = flags['dry-run'] === true;
+
+        if (flags['clean-corrupted']) {
+          const result = await manager.cleanupCorrupted(dryRun);
+          if (dryRun) {
+            console.log(`Would remove ${result.count} corrupted memories:`);
+            for (const s of result.samples) console.log(`  ${s}`);
+            if (result.count > result.samples.length) console.log(`  ... and ${result.count - result.samples.length} more`);
+          } else {
+            console.log(`Removed ${result.count} corrupted memories.`);
+          }
+          break;
+        }
+
+        if (flags.consolidate) {
+          const project = flags.project as string ?? (flags.all ? undefined : manager.detectProject());
+          const result = await manager.consolidate(project, dryRun);
+          if (dryRun) {
+            console.log(`Would consolidate ${result.consolidated} memories in ${result.clusters.length} clusters:`);
+            for (const c of result.clusters) {
+              console.log(`  Keep #${c.kept} → merge #${c.merged.join(', #')}`);
+            }
+          } else {
+            console.log(`Consolidated ${result.consolidated} memories in ${result.clusters.length} clusters.`);
+          }
+          break;
+        }
+
         if (flags.all) {
           // GC all projects + global
           const registry = manager.getProjectRegistry();

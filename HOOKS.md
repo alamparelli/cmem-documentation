@@ -4,12 +4,12 @@ Claude Code hooks allow cmem to automatically capture and inject memories during
 
 ## Overview
 
-| Hook | Trigger | Purpose |
-|------|---------|---------|
-| `UserPromptSubmit` | Before each prompt | Inject relevant memories + detect implicit stores |
-| `PostToolUse` | After Bash commands | Capture significant git commits |
-| `Stop` | After each response | Extract facts/decisions via Haiku |
-| `PreCompact` | Before context compaction | Extract session knowledge before it's lost |
+| Hook | Trigger | Purpose | Status |
+|------|---------|---------|--------|
+| `UserPromptSubmit` | Before each prompt | Inject relevant memories + detect implicit stores | Active (Haiku intent disabled) |
+| `PostToolUse` | After Bash commands | Capture significant git commits | Active (autoCommit disabled in config) |
+| `Stop` | After each response | Extract facts/decisions via Haiku | Active (source of corrupted memories, use `gc --clean-corrupted` periodically) |
+| `PreCompact` | Before context compaction | Extract session knowledge before it's lost | Active |
 
 ## Configuration
 
@@ -142,6 +142,14 @@ The hook detects phrases indicating the user wants something remembered:
 - "let's go with..." / "on part sur..."
 
 When detected, the memory is automatically saved with source `auto:session`.
+
+### Haiku Intent Analysis (Disabled)
+
+Since v3.1, the Haiku-based intent analysis at prompt time is **disabled** for performance reasons. The hook now uses passthrough mode: the raw prompt is used directly as the recall query, enriched with recent context keywords.
+
+Previously, Haiku analyzed each prompt to detect explicit recall requests ("what did we decide about X?") and reformulate queries. This added 2-5s latency per prompt. The passthrough approach works well enough with the enriched query builder.
+
+To re-enable, uncomment the `analyzeQueryIntent()` call in `recall.ts` (line ~379).
 
 ### Task Type Detection
 
@@ -287,6 +295,12 @@ Return JSON: {"items": [{"type": "decision|fact|preference", "content": "...", "
   category: "extracted"
 }
 ```
+
+### Known Issue: Corrupted Memories
+
+The Stop hook uses Haiku to extract items. When Haiku returns malformed responses, the raw JSON response (e.g., `{"items": []}\n\nRéponse à analyser:...`) can leak into stored content. This was a major source of memory bloat.
+
+**Mitigation**: Run `cmem gc --clean-corrupted` periodically to remove these artifacts. The recall hook also filters them at query time.
 
 ---
 

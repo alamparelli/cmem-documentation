@@ -41,6 +41,7 @@ export interface MemoryInput {
   tags?: string[];
   expiresAt?: number;
   supersedes?: number;
+  skipDedup?: boolean;
 }
 
 export interface RecallResult {
@@ -101,6 +102,11 @@ export interface Config {
   };
   sensitive: {
     patterns: string[];
+  };
+  dedup: {
+    enabled: boolean;
+    similarityThreshold: number;
+    preferLonger: boolean;
   };
   gc: {
     maxAgeUnusedDays: number;

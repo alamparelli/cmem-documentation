@@ -106,6 +106,34 @@ export class MemoryManager {
     return sanitized;
   }
 
+  /**
+   * Find a near-duplicate memory by embedding similarity.
+   * Returns the existing memory ID if found, null otherwise.
+   */
+  private async findNearDuplicate(
+    content: string,
+    embedding: number[],
+    db: Database.Database
+  ): Promise<{ id: number; content: string; importance: number } | null> {
+    if (!this.config.dedup.enabled) return null;
+
+    const threshold = this.config.dedup.similarityThreshold;
+
+    const row = db.prepare(`
+      SELECT v.rowid as id, v.distance, m.content, m.importance
+      FROM vec_memories v
+      JOIN memories m ON v.rowid = m.id
+      WHERE v.embedding MATCH ?
+        AND k = 1
+        AND m.is_obsolete = 0
+    `).get(JSON.stringify(embedding)) as { id: number; distance: number; content: string; importance: number } | undefined;
+
+    if (row && row.distance < threshold) {
+      return { id: row.id, content: row.content, importance: row.importance };
+    }
+    return null;
+  }
+
   async remember(input: MemoryInput): Promise<number[]> {
     // Check for sensitive data
     if (this.containsSensitiveData(input.content)) {
@@ -127,6 +155,25 @@ export class MemoryManager {
     try {
       for (const chunk of chunks) {
         const embedding = await this.embedder.embed(chunk.content);
+
+        // Dedup check: update existing if near-duplicate found
+        if (!input.skipDedup) {
+          const existing = await this.findNearDuplicate(chunk.content, embedding, db);
+          if (existing) {
+            // Update if new content is longer (preferLonger) or importance is higher
+            const shouldUpdate = (this.config.dedup.preferLonger && chunk.content.length > existing.content.length)
+              || (input.importance && input.importance > existing.importance);
+
+            if (shouldUpdate) {
+              db.prepare('UPDATE memories SET content = ?, importance = MAX(importance, ?) WHERE id = ?')
+                .run(chunk.content, input.importance ?? 3, existing.id);
+              db.prepare('UPDATE vec_memories SET embedding = ? WHERE rowid = ?')
+                .run(JSON.stringify(embedding), BigInt(existing.id));
+            }
+            memoryIds.push(existing.id);
+            continue;
+          }
+        }
 
         // Add chunk indicator if multi-part
         let storedContent = chunk.content;
@@ -660,6 +707,135 @@ export class MemoryManager {
 
   getProjectRegistry(): ProjectRegistryManager {
     return this.projectRegistry;
+  }
+
+  /**
+   * Consolidate near-duplicate memories by clustering.
+   * Keeps the highest-scoring memory per cluster, marks others obsolete.
+   */
+  async consolidate(project?: string | null, dryRun: boolean = false): Promise<{ consolidated: number; clusters: Array<{ kept: number; merged: number[] }> }> {
+    const db = this.getDb();
+    const clusters: Array<{ kept: number; merged: number[] }> = [];
+
+    try {
+      // Load all active memories
+      let sql = 'SELECT id, content, importance, confidence, access_count FROM memories WHERE is_obsolete = 0';
+      const params: unknown[] = [];
+
+      if (project !== undefined) {
+        if (project === null) {
+          sql += ' AND project IS NULL';
+        } else {
+          sql += ' AND project = ?';
+          params.push(project);
+        }
+      }
+
+      const memories = db.prepare(sql).all(...params) as Array<{
+        id: number; content: string; importance: number; confidence: number; access_count: number;
+      }>;
+
+      const threshold = this.config.dedup.similarityThreshold * 2;
+      const processed = new Set<number>();
+      let totalConsolidated = 0;
+
+      for (const mem of memories) {
+        if (processed.has(mem.id)) continue;
+        processed.add(mem.id);
+
+        // Find neighbors
+        const neighbors = db.prepare(`
+          SELECT v.rowid as id, v.distance
+          FROM vec_memories v
+          JOIN memories m ON v.rowid = m.id
+          WHERE v.embedding MATCH (SELECT embedding FROM vec_memories WHERE rowid = ?)
+            AND k = 20
+            AND m.is_obsolete = 0
+            AND v.rowid != ?
+        `).all(BigInt(mem.id), BigInt(mem.id)) as Array<{ id: number; distance: number }>;
+
+        const cluster = neighbors
+          .filter(n => n.distance < threshold && !processed.has(n.id))
+          .map(n => n.id);
+
+        if (cluster.length === 0) continue;
+
+        // Score all members including current
+        const allIds = [mem.id, ...cluster];
+        const scores: Array<{ id: number; score: number }> = [];
+
+        for (const id of allIds) {
+          const m = db.prepare('SELECT importance, confidence, access_count FROM memories WHERE id = ?').get(id) as {
+            importance: number; confidence: number; access_count: number;
+          };
+          if (m) {
+            scores.push({ id, score: m.importance * m.confidence * (1 + m.access_count) });
+          }
+        }
+
+        scores.sort((a, b) => b.score - a.score);
+        const winner = scores[0].id;
+        const losers = scores.slice(1).map(s => s.id);
+
+        if (!dryRun) {
+          for (const loserId of losers) {
+            db.prepare('UPDATE memories SET is_obsolete = 1, supersedes = ? WHERE id = ?').run(winner, loserId);
+          }
+        }
+
+        for (const id of losers) processed.add(id);
+        totalConsolidated += losers.length;
+        clusters.push({ kept: winner, merged: losers });
+      }
+
+      return { consolidated: totalConsolidated, clusters };
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Remove corrupted memories (JSON artifacts, Haiku prompts, tiny content).
+   */
+  async cleanupCorrupted(dryRun: boolean = false): Promise<{ count: number; samples: string[] }> {
+    const db = this.getDb();
+    const corruptPatterns = [
+      /^\s*\{/, // Starts with JSON object
+      /^\s*\[(?!\w)/, // Starts with JSON array (but not [filepath] prefixed content)
+      /^\s*Sois exhaustif/i, // Haiku prompt leaked
+      /Réponds UNIQUEMENT en JSON/i,
+      /^\s*Tu es un assistant/i, // Haiku system prompt leaked
+    ];
+
+    try {
+      const rows = db.prepare('SELECT id, content FROM memories WHERE is_obsolete = 0').all() as Array<{ id: number; content: string }>;
+
+      const corrupted: number[] = [];
+      const samples: string[] = [];
+
+      for (const row of rows) {
+        const isCorrupt = row.content.trim().length < 20
+          || corruptPatterns.some(p => p.test(row.content.trim()));
+
+        if (isCorrupt) {
+          corrupted.push(row.id);
+          if (samples.length < 10) {
+            samples.push(`#${row.id}: ${row.content.slice(0, 80)}`);
+          }
+        }
+      }
+
+      if (!dryRun && corrupted.length > 0) {
+        for (const id of corrupted) {
+          db.prepare('DELETE FROM vec_memories WHERE rowid = ?').run(BigInt(id));
+          db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+        }
+      }
+
+      return { count: corrupted.length, samples };
+    } finally {
+      db.close();
+    }
   }
 
   async isReady(): Promise<boolean> {

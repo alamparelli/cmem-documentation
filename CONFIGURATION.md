@@ -19,6 +19,7 @@ Location: `~/.claude/cmem/config.json`
   "recall": { ... },
   "capture": { ... },
   "sensitive": { ... },
+  "dedup": { ... },
   "gc": { ... }
 }
 ```
@@ -157,8 +158,8 @@ Controls automatic memory capture.
 ```json
 "capture": {
   "autoSession": true,
-  "autoCommit": true,
-  "commitPatterns": ["^(feat|fix|refactor|breaking|perf)"],
+  "autoCommit": false,
+  "commitPatterns": [".*"],
   "minImportance": 3
 }
 ```
@@ -166,29 +167,11 @@ Controls automatic memory capture.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `autoSession` | boolean | true | Enable implicit memory detection in prompts |
-| `autoCommit` | boolean | true | Capture significant git commits |
-| `commitPatterns` | string[] | ["^(feat|fix|...)"] | Regex patterns for commit types to capture |
+| `autoCommit` | boolean | false | Capture significant git commits (disabled: commits are already in git) |
+| `commitPatterns` | string[] | [".*"] | Regex patterns for commit types to capture |
 | `minImportance` | number | 3 | Default importance for auto-captured memories |
 
-### Commit Patterns
-
-Only commits matching these patterns are captured:
-
-- `^feat` - New features
-- `^fix` - Bug fixes
-- `^refactor` - Code refactoring
-- `^breaking` - Breaking changes
-- `^perf` - Performance improvements
-
-To capture all commits:
-```json
-"commitPatterns": [".*"]
-```
-
-To capture only features and fixes:
-```json
-"commitPatterns": ["^(feat|fix)"]
-```
+> **Note**: `autoCommit` is disabled by default since v3.1. Commit messages are already stored in git history and were a major source of memory bloat without adding recall value.
 
 ---
 
@@ -233,6 +216,42 @@ For database URLs:
 
 ---
 
+## dedup
+
+Controls near-duplicate detection when storing memories.
+
+```json
+"dedup": {
+  "enabled": true,
+  "similarityThreshold": 5.0,
+  "preferLonger": true
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | true | Enable dedup check on `remember()` |
+| `similarityThreshold` | number | 5.0 | Max L2 distance to consider as duplicate (lower = stricter) |
+| `preferLonger` | boolean | true | When dedup matches, update if new content is longer |
+
+### How Dedup Works
+
+When `remember()` is called:
+1. Embed the new content
+2. Search `vec_memories` for nearest neighbor with distance < `similarityThreshold`
+3. If match found: update existing memory (keep higher importance, optionally update content if longer)
+4. If no match: insert as new memory
+
+The `skipDedup` flag on `MemoryInput` bypasses this check (useful for bulk ingest).
+
+### Threshold Tuning
+
+- **5.0** (default): Only near-identical content is deduped
+- **10.0**: More aggressive, catches paraphrases
+- **2.0**: Very strict, only exact matches
+
+---
+
 ## gc
 
 Garbage collection settings.
@@ -266,7 +285,32 @@ cmem gc
 
 # GC everything
 cmem gc --all
+
+# Clean corrupted + consolidate + standard GC
+cmem gc --clean-corrupted
+cmem gc --consolidate --all
+cmem gc --all
 ```
+
+### Automatic GC (launchd)
+
+A launchd agent runs GC automatically every 6 hours:
+
+- **Plist**: `~/Library/LaunchAgents/com.cmem.gc-auto.plist`
+- **Script**: `~/.claude/cmem/scripts/gc-auto.sh`
+- **Interval**: 21600s (6h)
+- **Actions**: clean-corrupted → consolidate → standard GC
+- **Logs**: `~/.claude/cmem/hooks.log` with `[gc-auto]` prefix
+
+```bash
+# Manage
+launchctl list | grep cmem              # Check status
+launchctl start com.cmem.gc-auto        # Trigger manually
+launchctl unload ~/Library/LaunchAgents/com.cmem.gc-auto.plist  # Disable
+launchctl load ~/Library/LaunchAgents/com.cmem.gc-auto.plist    # Re-enable
+```
+
+The script skips silently if MLX server is not running.
 
 ---
 
